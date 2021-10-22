@@ -104,6 +104,7 @@ extern uint64 sys_unlink(void);
 extern uint64 sys_wait(void);
 extern uint64 sys_write(void);
 extern uint64 sys_uptime(void);
+extern uint64 sys_trace(void);
 
 static uint64 (*syscalls[])(void) = {
 [SYS_fork]    sys_fork,
@@ -127,7 +128,68 @@ static uint64 (*syscalls[])(void) = {
 [SYS_link]    sys_link,
 [SYS_mkdir]   sys_mkdir,
 [SYS_close]   sys_close,
+[SYS_trace]   sys_trace,
 };
+
+char *syscall_name[] = {
+[SYS_fork]   "fork",
+[SYS_exit]   "exit",
+[SYS_wait]   "wait",
+[SYS_pipe]   "pipe",
+[SYS_read]   "read",
+[SYS_kill]   "kill",
+[SYS_exec]   "exec",
+[SYS_fstat]  "fstat",
+[SYS_chdir]  "chdir",
+[SYS_dup]    "dup",
+[SYS_getpid] "getpid",
+[SYS_sbrk]   "sbrk",
+[SYS_sleep]  "sleep",
+[SYS_uptime] "uptime",
+[SYS_open]   "open",
+[SYS_write]  "write",
+[SYS_mknod]  "mknod",
+[SYS_unlink] "unlink",
+[SYS_link]   "link",
+[SYS_mkdir]  "mkdir",
+[SYS_close]  "close",
+[SYS_trace]  "trace",
+};
+
+int syscall_numargs[] = {
+[SYS_fork]   0,
+[SYS_exit]   1,
+[SYS_wait]   1,
+[SYS_pipe]   1,
+[SYS_read]   3,
+[SYS_kill]   1,
+[SYS_exec]   2,
+[SYS_fstat]  2,
+[SYS_chdir]  1,
+[SYS_dup]    1,
+[SYS_getpid] 0,
+[SYS_sbrk]   1,
+[SYS_sleep]  1,
+[SYS_uptime] 0,
+[SYS_open]   2,
+[SYS_write]  3,
+[SYS_mknod]  3,
+[SYS_unlink] 1,
+[SYS_link]   2,
+[SYS_mkdir]  1,
+[SYS_close]  1,
+[SYS_trace]  1,
+};
+
+void print_strace(struct proc *p, int num){
+  printf("%d: syscall %s (", p->pid, syscall_name[num]);
+  for(int i=0; i<syscall_numargs[num]; i++){
+    int arg;
+    argint(i, &arg);
+    printf((i==syscall_numargs[num]-1)?"%d":"%d ", arg);
+  }
+  printf(") -> %d\n", p->trapframe->a0);
+}
 
 void
 syscall(void)
@@ -138,6 +200,10 @@ syscall(void)
   num = p->trapframe->a7;
   if(num > 0 && num < NELEM(syscalls) && syscalls[num]) {
     p->trapframe->a0 = syscalls[num]();
+
+    // If trace bit set, print trace info
+    if(p->strace_mask & (1<<num))
+      print_strace(p, num);
   } else {
     printf("%d %s: unknown sys call %d\n",
             p->pid, p->name, num);
