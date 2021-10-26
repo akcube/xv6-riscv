@@ -106,4 +106,9 @@ struct proc {
   struct inode *cwd;           // Current directory
   int strace_mask;          // Mask for syscall tracing (debugging)
   char name[16];               // Process name (debugging)
+
+  // scheduler information private to the process
+  #ifdef FCFS
+    uint64 creation_time;
+  #endif
 };

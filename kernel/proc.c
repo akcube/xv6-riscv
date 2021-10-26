@@ -20,6 +20,8 @@ static void freeproc(struct proc *p);
 
 extern char trampoline[]; // trampoline.S
 
+uint64 sys_uptime(void);
+
 // helps ensure that wakeups of wait()ing
 // parents are not lost. helps obey the
 // memory model when using p->parent.
@@ -119,6 +121,10 @@ allocproc(void)
 found:
   p->pid = allocpid();
   p->state = USED;
+
+  #ifdef FCFS
+    p->creation_time = sys_uptime();
+  #endif
 
   // Allocate a trapframe page.
   if((p->trapframe = (struct trapframe *)kalloc()) == 0){
@@ -429,6 +435,71 @@ wait(uint64 addr)
   }
 }
 
+void 
+lock_ptable(){
+  for(struct proc *p = proc; p < &proc[NPROC]; p++)
+    acquire(&p->lock);
+}
+
+void
+release_ptable(struct proc *e){
+  for(struct proc *p = proc; p < &proc[NPROC]; p++)
+    if(p != e)
+      release(&p->lock);
+}
+
+#ifdef ROUNDROBIN
+  void
+  round_robin(struct cpu *c)
+  {
+    for(struct proc *p = proc; p < &proc[NPROC]; p++) {
+        acquire(&p->lock);
+        if(p->state == RUNNABLE) {
+          // Switch to chosen process.  It is the process's job
+          // to release its lock and then reacquire it
+          // before jumping back to us.
+          p->state = RUNNING;
+          c->proc = p;
+          swtch(&c->context, &p->context);
+
+          // Process is done running for now.
+          // It should have changed its p->state before coming back.
+          c->proc = 0;
+        }
+        release(&p->lock);
+    }
+  }
+#endif
+
+#ifdef FCFS
+  void
+  fcfs(struct cpu *c)
+  {
+    uint64 mintime = 0;
+    struct proc *minproc = 0;
+
+
+    for(struct proc *p = proc; p < &proc[NPROC]; p++) {
+      acquire(&p->lock);
+      if(p->state == RUNNABLE) {
+        if(!minproc || p->creation_time < mintime){
+          if(minproc) release(&minproc->lock);
+          minproc = p;
+        }
+      }
+      if(minproc != p) release(&p->lock);
+    }
+
+    if(minproc){
+      minproc->state = RUNNING;
+      c->proc = minproc;
+      swtch(&c->context, &minproc->context);
+      c->proc = 0;
+      release(&minproc->lock);
+    }
+  }
+#endif
+
 // Per-CPU process scheduler.
 // Each CPU calls scheduler() after setting itself up.
 // Scheduler never returns.  It loops, doing:
@@ -439,7 +510,6 @@ wait(uint64 addr)
 void
 scheduler(void)
 {
-  struct proc *p;
   struct cpu *c = mycpu();
   
   c->proc = 0;
@@ -447,22 +517,13 @@ scheduler(void)
     // Avoid deadlock by ensuring that devices can interrupt.
     intr_on();
 
-    for(p = proc; p < &proc[NPROC]; p++) {
-      acquire(&p->lock);
-      if(p->state == RUNNABLE) {
-        // Switch to chosen process.  It is the process's job
-        // to release its lock and then reacquire it
-        // before jumping back to us.
-        p->state = RUNNING;
-        c->proc = p;
-        swtch(&c->context, &p->context);
+    #ifdef ROUNDROBIN
+      round_robin(c);
+    #endif
 
-        // Process is done running for now.
-        // It should have changed its p->state before coming back.
-        c->proc = 0;
-      }
-      release(&p->lock);
-    }
+    #ifdef FCFS
+      fcfs(c);
+    #endif
   }
 }
 
