@@ -481,13 +481,11 @@ release_ptable(struct proc *e){
 
     for(struct proc *p = proc; p < &proc[NPROC]; p++) {
       acquire(&p->lock);
-      if(p->state == RUNNABLE) {
-        if(!minproc || p->creation_time < mintime){
-          if(minproc) release(&minproc->lock);
-          minproc = p;
-        }
+      if(p->state == RUNNABLE && (!minproc || p->creation_time < mintime)) {
+        if(minproc) release(&minproc->lock);
+        minproc = p;
       }
-      if(minproc != p) release(&p->lock);
+      else release(&p->lock);
     }
 
     if(minproc){
