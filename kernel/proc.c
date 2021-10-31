@@ -512,6 +512,23 @@ release_ptable(struct proc *e){
 
 #ifdef PBS
 
+  void 
+  set_static_priority(int priority, int pid)
+  {
+    for(struct proc *p = proc; p < &proc[NPROC]; p++){
+      if(myproc() == p){
+        if(p->pid == pid)
+          p->s_priority = priority;
+      }
+      else{
+        acquire(&p->lock);
+        if(p->pid == pid)
+          p->s_priority = priority;
+        release(&p->lock);
+      }
+    }
+  }
+
   uint64 max(uint64 a, uint64 b){ return (a>b)?a:b; }
   uint64 min(uint64 a, uint64 b){ return (a<b)?a:b; }
 
@@ -826,7 +843,15 @@ procdump(void)
       state = states[p->state];
     else
       state = "???";
+
+#if defined(FCFS) || defined(ROUNDROBIN)
     printf("%d %s %s", p->pid, state, p->name);
+#endif
+
+#ifdef PBS
+    printf("%d %s %d %s %d %d %d", p->pid, p->name, p->s_priority, state, p->run_time, p->sleep_time, p->sched_ct);
+#endif
+
     printf("\n");
   }
 }

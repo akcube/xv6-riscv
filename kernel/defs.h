@@ -107,6 +107,7 @@ void            procdump(void);
 
 #ifdef PBS
 void 			update_time();
+void 			set_static_priority();
 #endif
 
 // swtch.S

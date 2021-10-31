@@ -105,6 +105,7 @@ extern uint64 sys_wait(void);
 extern uint64 sys_write(void);
 extern uint64 sys_uptime(void);
 extern uint64 sys_trace(void);
+extern uint64 sys_set_priority(void);
 
 static uint64 (*syscalls[])(void) = {
 [SYS_fork]    sys_fork,
@@ -129,6 +130,7 @@ static uint64 (*syscalls[])(void) = {
 [SYS_mkdir]   sys_mkdir,
 [SYS_close]   sys_close,
 [SYS_trace]   sys_trace,
+[SYS_set_priority]  sys_set_priority,
 };
 
 char *syscall_name[] = {
@@ -154,6 +156,7 @@ char *syscall_name[] = {
 [SYS_mkdir]  "mkdir",
 [SYS_close]  "close",
 [SYS_trace]  "trace",
+[SYS_set_priority] "set_priority",
 };
 
 int syscall_numargs[] = {
@@ -179,6 +182,7 @@ int syscall_numargs[] = {
 [SYS_mkdir]  1,
 [SYS_close]  1,
 [SYS_trace]  1,
+[SYS_set_priority] 1,
 };
 
 void print_strace(struct proc *p, int num){

@@ -40,6 +40,26 @@ sys_trace(void)
 }
 
 uint64
+sys_set_priority(void){
+
+#ifdef PBS
+  int priority, pid;
+  if(argint(0, &priority) < 0)
+    return -1;
+  if(argint(1, &pid) < 0)
+    return -1;
+
+  set_static_priority(priority, pid);
+  return 0;
+#endif
+
+#if defined(FCFS) || defined(ROUNDROBIN)
+  printf("Wrong scheduler\n");
+  return 0;
+#endif
+}
+
+uint64
 sys_wait(void)
 {
   uint64 p;
