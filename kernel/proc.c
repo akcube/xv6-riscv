@@ -581,19 +581,24 @@ release_ptable(struct proc *e){
 
 #ifdef PBS
 
-  void 
+  int 
   set_static_priority(int priority, int pid)
   {
     for(struct proc *p = proc; p < &proc[NPROC]; p++){
       if(myproc() == p){
         if(p->pid == pid){
+          int old_priority = p->s_priority;
           p->niceness = 5;
           p->run_time = 0;
           p->sleep_time = 0;
           p->s_priority = priority;
+          if(priority < old_priority)
+            yield();
+          return old_priority;
         }
       }
       else{
+        int old_priority = p->s_priority;
         acquire(&p->lock);
         if(p->pid == pid){
           p->niceness = 5;
@@ -602,8 +607,12 @@ release_ptable(struct proc *e){
           p->s_priority = priority;
         }
         release(&p->lock);
+        if(priority < old_priority)
+          yield();
+        return old_priority;
       }
     }
+    return 0;
   }
 
   uint64 max(uint64 a, uint64 b){ return (a>b)?a:b; }

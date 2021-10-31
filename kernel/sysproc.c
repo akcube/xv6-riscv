@@ -48,9 +48,8 @@ sys_set_priority(void){
     return -1;
   if(argint(1, &pid) < 0)
     return -1;
-
-  set_static_priority(priority, pid);
-  return 0;
+  int val = set_static_priority(priority, pid);
+  return val;
 #endif
 
 #if defined(FCFS) || defined(ROUNDROBIN) || defined(MLFQ)

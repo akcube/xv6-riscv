@@ -110,7 +110,7 @@ void 			update_time();
 void 			remove_queue(struct proc*, int);
 
 #ifdef PBS
-void 			set_static_priority();
+int 			set_static_priority();
 #endif
 
 
