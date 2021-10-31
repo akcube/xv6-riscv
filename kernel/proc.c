@@ -517,13 +517,21 @@ release_ptable(struct proc *e){
   {
     for(struct proc *p = proc; p < &proc[NPROC]; p++){
       if(myproc() == p){
-        if(p->pid == pid)
+        if(p->pid == pid){
+          p->niceness = 5;
+          p->run_time = 0;
+          p->sleep_time = 0;
           p->s_priority = priority;
+        }
       }
       else{
         acquire(&p->lock);
-        if(p->pid == pid)
+        if(p->pid == pid){
+          p->niceness = 5;
+          p->run_time = 0;
+          p->sleep_time = 0;
           p->s_priority = priority;
+        }
         release(&p->lock);
       }
     }
@@ -542,6 +550,7 @@ release_ptable(struct proc *e){
     else{
       niceness = (p->sleep_time/(p->run_time + p->sleep_time)) * 10;
     }
+    p->niceness = niceness;
     uint64 DP = max(0, min(p->s_priority - niceness + 5, 100));
     return DP;  
   }

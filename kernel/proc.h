@@ -114,6 +114,7 @@ struct proc {
 
   #ifdef PBS
     int s_priority;
+    int niceness;
     int sched_ct;
 
     uint64 run_time;

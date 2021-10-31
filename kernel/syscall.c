@@ -185,14 +185,11 @@ int syscall_numargs[] = {
 [SYS_set_priority] 1,
 };
 
-void print_strace(struct proc *p, int num){
-  printf("%d: syscall %s (", p->pid, syscall_name[num]);
-  for(int i=0; i<syscall_numargs[num]; i++){
-    int arg;
-    argint(i, &arg);
-    printf((i==syscall_numargs[num]-1)?"%d":"%d ", arg);
-  }
-  printf(") -> %d\n", p->trapframe->a0);
+void print_strace(int pid, int *saved_args, int num, int retval){
+  printf("%d: syscall %s (", pid, syscall_name[num]);
+  for(int i=0; i<syscall_numargs[num]; i++)
+    printf((i==syscall_numargs[num]-1)?"%d":"%d ", saved_args[i]);
+  printf(") -> %d\n", retval);
 }
 
 void
@@ -200,14 +197,18 @@ syscall(void)
 {
   int num;
   struct proc *p = myproc();
-
   num = p->trapframe->a7;
+
+  int saved_args[10];
+  for(int i=0; i<syscall_numargs[num]; i++)
+    argint(i, &saved_args[i]);
+
   if(num > 0 && num < NELEM(syscalls) && syscalls[num]) {
     p->trapframe->a0 = syscalls[num]();
 
     // If trace bit set, print trace info
     if(p->strace_mask & (1<<num))
-      print_strace(p, num);
+      print_strace(p->pid, saved_args, num, p->trapframe->a0);
   } else {
     printf("%d %s: unknown sys call %d\n",
             p->pid, p->name, num);
