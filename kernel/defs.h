@@ -8,6 +8,7 @@ struct spinlock;
 struct sleeplock;
 struct stat;
 struct superblock;
+struct queueInfo;
 
 // bio.c
 void            binit(void);
@@ -106,8 +107,11 @@ int             either_copyin(void *dst, int user_src, uint64 src, uint64 len);
 void            procdump(void);
 
 #ifdef PBS
-void 			update_time();
 void 			set_static_priority();
+#endif
+
+#if defined(MLFQ) || defined(PBS)
+void 			update_time();
 #endif
 
 // swtch.S
@@ -189,3 +193,8 @@ void            virtio_disk_intr(void);
 
 // number of elements in fixed-size array
 #define NELEM(x) (sizeof(x)/sizeof((x)[0]))
+
+// queue.c
+void 			init_queue(void);
+void 			push_back(struct proc *, int);
+struct proc*	pop_front(int);

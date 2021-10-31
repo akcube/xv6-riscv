@@ -53,7 +53,7 @@ sys_set_priority(void){
   return 0;
 #endif
 
-#if defined(FCFS) || defined(ROUNDROBIN)
+#if defined(FCFS) || defined(ROUNDROBIN) || defined(MLFQ)
   printf("Wrong scheduler\n");
   return 0;
 #endif

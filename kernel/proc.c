@@ -5,6 +5,7 @@
 #include "spinlock.h"
 #include "proc.h"
 #include "defs.h"
+#include "queue.h"
 
 struct cpu cpus[NCPU];
 
@@ -122,14 +123,19 @@ found:
   p->pid = allocpid();
   p->state = USED;
 
-#if defined(FCFS) || defined(PBS)
-  // acquire(&tickslock);
+#if defined(FCFS) || defined(PBS) || defined(MLFQ)
   p->creation_time = ticks;
-  // release(&tickslock);
 #endif
 
 #ifdef PBS
   p->s_priority = 60;
+  p->niceness = 5;
+#endif
+
+#ifdef MLFQ
+  p->queue_pos = -1;
+  p->ticks_used = 0;
+  p->inqueue = 0;
 #endif
 
   // Allocate a trapframe page.
@@ -179,10 +185,14 @@ freeproc(struct proc *p)
   p->state = UNUSED;
 
 #ifdef PBS
+  p->s_priority = 0;
+  p->niceness = 5;
+#endif
+
+#if defined(PBS) || defined(MLFQ)
   p->run_time = 0;
   p->sleep_time = 0;
   p->sched_ct = 0;
-  p->s_priority = 0;
 #endif
 }
 
@@ -474,10 +484,10 @@ release_ptable(struct proc *e){
           p->state = RUNNING;
           c->proc = p;
           swtch(&c->context, &p->context);
+          c->proc = 0;
 
           // Process is done running for now.
           // It should have changed its p->state before coming back.
-          c->proc = 0;
         }
         release(&p->lock);
     }
@@ -614,6 +624,37 @@ release_ptable(struct proc *e){
   }
 #endif
 
+#ifdef MLFQ
+  // We do not care about acquiring or releasing any locks here as MLFQ will be run on only one CPU.
+  void
+  mlfq(struct cpu *c)
+  {
+    for(struct proc *p = proc; p < &proc[NPROC]; p++){
+      if(p->state == RUNNABLE && !p->inqueue){
+        int to = (p->queue_pos == 4) ? 4 : p->queue_pos + 1;
+        push_back(p, to);
+      }
+    }
+
+    for(int qpos = 0; qpos < 5; qpos++){
+      while(queueInfo.size[qpos] > 0){
+        struct proc *bestproc = pop_front(qpos);
+        bestproc->state = RUNNING;
+
+        acquire(&bestproc->lock);
+
+        c->proc = bestproc;
+        swtch(&c->context, &bestproc->context);
+        c->proc = 0;
+        
+        release(&bestproc->lock);
+
+        return;
+      }
+    }
+  }
+#endif
+
 // Per-CPU process scheduler.
 // Each CPU calls scheduler() after setting itself up.
 // Scheduler never returns.  It loops, doing:
@@ -642,10 +683,14 @@ scheduler(void)
     #ifdef PBS
       pbs(c);
     #endif
+
+    #ifdef MLFQ
+      mlfq(c);
+    #endif
   }
 }
 
-#ifdef PBS
+#if defined(PBS) || defined(MLFQ)
   void
   update_time(){
     struct proc *p;
@@ -859,6 +904,10 @@ procdump(void)
 
 #ifdef PBS
     printf("%d %s %d %s %d %d %d", p->pid, p->name, p->s_priority, state, p->run_time, p->sleep_time, p->sched_ct);
+#endif
+
+#ifdef MLFQ
+    printf("%d %s %s %d %d %d", p->pid, p->name, state, p->run_time, p->sleep_time, p->sched_ct);
 #endif
 
     printf("\n");

@@ -4,6 +4,7 @@
 #include "riscv.h"
 #include "spinlock.h"
 #include "proc.h"
+#include "queue.h"
 #include "defs.h"
 
 struct spinlock tickslock;
@@ -82,6 +83,30 @@ usertrap(void)
       yield();
   #endif
 
+  #if defined(MLFQ)
+
+    if(which_dev == 2){
+      struct proc *p = myproc();
+
+      if(p && p->state == RUNNING){
+
+        for(int i=0; i < p->queue_pos; i++){
+          if(queueInfo.size[i]){
+            p->ticks_used = 0;
+            yield();
+          }
+        }
+
+        if(p->ticks_used >= queueInfo.max_ticks[p->queue_pos]){
+          p->ticks_used = 0;
+          yield();
+        }
+        p->ticks_used++;
+      }
+    }
+
+  #endif
+
   usertrapret();
 }
 
@@ -157,6 +182,30 @@ kerneltrap()
       yield();
   #endif
 
+  #if defined(MLFQ)
+
+    if(which_dev == 2){
+      struct proc *p = myproc();
+
+      if(p && p->state == RUNNING){
+        p->ticks_used++;
+
+        for(int i=0; i < p->queue_pos; i++){
+          if(queueInfo.size[i]){
+            p->ticks_used = 0;
+            yield();
+          }
+        }
+
+        if(p->ticks_used >= queueInfo.max_ticks[p->queue_pos]){
+          p->ticks_used = 0;
+          yield();
+        }
+      }
+    }
+
+  #endif
+
   // the yield() may have caused some traps to occur,
   // so restore trap registers for use by kernelvec.S's sepc instruction.
   w_sepc(sepc);
@@ -168,7 +217,7 @@ clockintr()
 {
   acquire(&tickslock);
   ticks++;
-  #ifdef PBS
+  #if defined(PBS) || defined(MLFQ)
     update_time();
   #endif
   wakeup(&ticks);
