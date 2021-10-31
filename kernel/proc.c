@@ -121,21 +121,27 @@ allocproc(void)
 
 found:
   p->pid = allocpid();
-  p->state = USED;
 
-#if defined(FCFS) || defined(PBS) || defined(MLFQ)
   p->creation_time = ticks;
-#endif
 
 #ifdef PBS
   p->s_priority = 60;
   p->niceness = 5;
 #endif
 
+  p->run_time = 0;
+  p->end_time = 0;
+  p->sleep_time = 0;
+  p->sched_ct = 0;
+
 #ifdef MLFQ
-  p->queue_pos = -1;
+  p->queue_pos = 0;
   p->ticks_used = 0;
   p->inqueue = 0;
+  p->cur_wait_time = 0;
+  p->entered_queue = 0;
+  for(int i=0; i<5; i++)
+    p->queue_time[i] = 0;
 #endif
 
   // Allocate a trapframe page.
@@ -159,6 +165,7 @@ found:
   p->context.ra = (uint64)forkret;
   p->context.sp = p->kstack + PGSIZE;
 
+  p->state = USED;
   return p;
 }
 
@@ -189,11 +196,10 @@ freeproc(struct proc *p)
   p->niceness = 5;
 #endif
 
-#if defined(PBS) || defined(MLFQ)
   p->run_time = 0;
   p->sleep_time = 0;
   p->sched_ct = 0;
-#endif
+  p->end_time = 0;
 }
 
 // Create a user page table for a given process,
@@ -401,6 +407,7 @@ exit(int status)
 
   p->xstate = status;
   p->state = ZOMBIE;
+  p->end_time = ticks;
 
   release(&wait_lock);
 
@@ -453,6 +460,57 @@ wait(uint64 addr)
       return -1;
     }
     
+    // Wait for a child to exit.
+    sleep(p, &wait_lock);  //DOC: wait-sleep
+  }
+}
+
+// Wait for a child process to exit and return its pid.
+// Return -1 if this process has no children.
+int
+waitx(uint64 addr, uint* rtime, uint* wtime)
+{
+  struct proc *np;
+  int havekids, pid;
+  struct proc *p = myproc();
+
+  acquire(&wait_lock);
+
+  for(;;){
+    // Scan through table looking for exited children.
+    havekids = 0;
+    for(np = proc; np < &proc[NPROC]; np++){
+      if(np->parent == p){
+        // make sure the child isn't still in exit() or swtch().
+        acquire(&np->lock);
+
+        havekids = 1;
+        if(np->state == ZOMBIE){
+          // Found one.
+          pid = np->pid;
+          *rtime = np->run_time;
+          *wtime = np->end_time - np->creation_time - np->run_time;
+          if(addr != 0 && copyout(p->pagetable, addr, (char *)&np->xstate,
+                                  sizeof(np->xstate)) < 0) {
+            release(&np->lock);
+            release(&wait_lock);
+            return -1;
+          }
+          freeproc(np);
+          release(&np->lock);
+          release(&wait_lock);
+          return pid;
+        }
+        release(&np->lock);
+      }
+    }
+
+    // No point waiting if we don't have any children.
+    if(!havekids || p->killed){
+      release(&wait_lock);
+      return -1;
+    }
+
     // Wait for a child to exit.
     sleep(p, &wait_lock);  //DOC: wait-sleep
   }
@@ -629,9 +687,17 @@ release_ptable(struct proc *e){
   void
   mlfq(struct cpu *c)
   {
+
+    for(struct proc *p = proc; p < &proc[NPROC]; p++){
+      if(p->inqueue && p->cur_wait_time > AGETICKS && p->queue_pos > 0){
+        remove_queue(p, p->queue_pos);
+        push_back(p, p->queue_pos-1);
+      }
+    }
+
     for(struct proc *p = proc; p < &proc[NPROC]; p++){
       if(p->state == RUNNABLE && !p->inqueue){
-        int to = (p->queue_pos == 4) ? 4 : p->queue_pos + 1;
+        int to = (p->queue_pos == 4) ? 4 : p->queue_pos;
         push_back(p, to);
       }
     }
@@ -640,7 +706,8 @@ release_ptable(struct proc *e){
       while(queueInfo.size[qpos] > 0){
         struct proc *bestproc = pop_front(qpos);
         bestproc->state = RUNNING;
-
+        bestproc->sched_ct++;
+        bestproc->cur_wait_time = 0;
         acquire(&bestproc->lock);
 
         c->proc = bestproc;
@@ -690,26 +757,37 @@ scheduler(void)
   }
 }
 
-#if defined(PBS) || defined(MLFQ)
-  void
-  update_time(){
-    struct proc *p;
-    for(p = proc; p < &proc[NPROC]; p++){
-      acquire(&p->lock);
-      switch(p->state){
-        case RUNNING:
-          p->run_time++;
-        break;
-        case SLEEPING:
-          p->sleep_time++;
-        break;
-        default:
-        break;
-      }
-      release(&p->lock);
+void
+update_time(){
+  struct proc *p;
+  for(p = proc; p < &proc[NPROC]; p++){
+    acquire(&p->lock);
+    switch(p->state){
+      case RUNNING:
+        p->run_time++;
+        #ifdef MLFQ
+          p->queue_time[p->queue_pos]++;
+        #endif
+      break;
+      case SLEEPING:
+        p->sleep_time++;
+        #ifdef MLFQ
+          p->queue_time[p->queue_pos]++;
+          p->cur_wait_time++;
+        #endif
+      break;
+      case RUNNABLE:
+        #ifdef MLFQ
+          p->cur_wait_time++;
+          p->queue_time[p->queue_pos]++;
+        #endif
+      break;
+      default:
+      break;
     }
+    release(&p->lock);
   }
-#endif
+}
 
 // Switch to scheduler.  Must hold only p->lock
 // and have changed proc->state. Saves and restores
@@ -890,6 +968,7 @@ procdump(void)
   char *state;
 
   printf("\n");
+#if defined(FCFS) || defined(ROUNDROBIN)
   for(p = proc; p < &proc[NPROC]; p++){
     if(p->state == UNUSED)
       continue;
@@ -898,18 +977,41 @@ procdump(void)
     else
       state = "???";
 
-#if defined(FCFS) || defined(ROUNDROBIN)
     printf("%d %s %s", p->pid, state, p->name);
+    printf("\n");
+  }
 #endif
 
 #ifdef PBS
-    printf("%d %s %d %s %d %d %d", p->pid, p->name, p->s_priority, state, p->run_time, p->sleep_time, p->sched_ct);
+  printf("\n");
+  printf("PID\tPriority\tState\trtime\twtime\tnrun\n");
+  for(p = proc; p < &proc[NPROC]; p++){
+    if(p->state == UNUSED)
+      continue;
+    if(p->state >= 0 && p->state < NELEM(states) && states[p->state])
+      state = states[p->state];
+    else
+      state = "???";
+    printf("%d\t%d\t%s\t%d\t%d\t%d\n", p->pid, get_dynamic_priority(p), state, p->run_time, ticks - p->creation_time - p->run_time, p->sched_ct);
+    printf("\n");
+  }
 #endif
 
+
 #ifdef MLFQ
-    printf("%d %s %s %d %d %d", p->pid, p->name, state, p->run_time, p->sleep_time, p->sched_ct);
+  printf("\n");
+  printf("PID\tPriority\tState\trtime\twtime\tnrun\tq0\tq1\tq2\tq3\tq4\n");
+  for(p = proc; p < &proc[NPROC]; p++){
+    if(p->state == UNUSED)
+      continue;
+    if(p->state >= 0 && p->state < NELEM(states) && states[p->state])
+      state = states[p->state];
+    else
+      state = "???";
+    printf("%d\t%d\t\t%s\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\n", p->pid, p->queue_pos, state, p->run_time, ticks - p->entered_queue, p->sched_ct, p->queue_time[0], p->queue_time[1], p->queue_time[2], p->queue_time[3], p->queue_time[4]);
+    printf("\n");
+  }
 #endif
 
     printf("\n");
-  }
 }

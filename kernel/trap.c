@@ -89,19 +89,24 @@ usertrap(void)
       struct proc *p = myproc();
 
       if(p && p->state == RUNNING){
+        p->ticks_used++;
 
         for(int i=0; i < p->queue_pos; i++){
           if(queueInfo.size[i]){
             p->ticks_used = 0;
+            push_back(p, p->queue_pos);
             yield();
           }
         }
 
         if(p->ticks_used >= queueInfo.max_ticks[p->queue_pos]){
           p->ticks_used = 0;
+          if(p->queue_pos >= 4)
+            push_back(p, 4);
+          else
+            push_back(p, p->queue_pos + 1);
           yield();
         }
-        p->ticks_used++;
       }
     }
 
@@ -193,12 +198,17 @@ kerneltrap()
         for(int i=0; i < p->queue_pos; i++){
           if(queueInfo.size[i]){
             p->ticks_used = 0;
+            push_back(p, p->queue_pos);
             yield();
           }
         }
 
         if(p->ticks_used >= queueInfo.max_ticks[p->queue_pos]){
           p->ticks_used = 0;
+          if(p->queue_pos == 4)
+            push_back(p, 4);
+          else
+            push_back(p, p->queue_pos + 1);
           yield();
         }
       }
@@ -217,9 +227,7 @@ clockintr()
 {
   acquire(&tickslock);
   ticks++;
-  #if defined(PBS) || defined(MLFQ)
-    update_time();
-  #endif
+  update_time();
   wakeup(&ticks);
   release(&tickslock);
 }
