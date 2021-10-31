@@ -122,9 +122,15 @@ found:
   p->pid = allocpid();
   p->state = USED;
 
-  #ifdef FCFS
-    p->creation_time = sys_uptime();
-  #endif
+#if defined(FCFS) || defined(PBS)
+  // acquire(&tickslock);
+  p->creation_time = ticks;
+  // release(&tickslock);
+#endif
+
+#ifdef PBS
+  p->s_priority = 60;
+#endif
 
   // Allocate a trapframe page.
   if((p->trapframe = (struct trapframe *)kalloc()) == 0){
@@ -171,6 +177,13 @@ freeproc(struct proc *p)
   p->killed = 0;
   p->xstate = 0;
   p->state = UNUSED;
+
+#ifdef PBS
+  p->run_time = 0;
+  p->sleep_time = 0;
+  p->sched_ct = 0;
+  p->s_priority = 0;
+#endif
 }
 
 // Create a user page table for a given process,
@@ -478,7 +491,6 @@ release_ptable(struct proc *e){
     uint64 mintime = 0;
     struct proc *minproc = 0;
 
-
     for(struct proc *p = proc; p < &proc[NPROC]; p++) {
       acquire(&p->lock);
       if(p->state == RUNNABLE && (!minproc || p->creation_time < mintime)) {
@@ -486,6 +498,84 @@ release_ptable(struct proc *e){
         minproc = p;
       }
       else release(&p->lock);
+    }
+
+    if(minproc){
+      minproc->state = RUNNING;
+      c->proc = minproc;
+      swtch(&c->context, &minproc->context);
+      c->proc = 0;
+      release(&minproc->lock);
+    }
+  }
+#endif
+
+#ifdef PBS
+
+  uint64 max(uint64 a, uint64 b){ return (a>b)?a:b; }
+  uint64 min(uint64 a, uint64 b){ return (a<b)?a:b; }
+
+  uint64 
+  get_dynamic_priority(struct proc *p)
+  {
+    uint64 niceness;
+    if(p->run_time == 0){
+      niceness = 5;
+    }
+    else{
+      niceness = (p->sleep_time/(p->run_time + p->sleep_time)) * 10;
+    }
+    uint64 DP = max(0, min(p->s_priority - niceness + 5, 100));
+    return DP;  
+  }
+
+  void
+  pbs(struct cpu *c)
+  {
+    uint64 min_priority = 0;
+    struct proc *minproc = 0;
+    for(struct proc *p = proc; p < &proc[NPROC]; p++){
+      
+      acquire(&p->lock);
+      if(p->state != RUNNABLE) {
+        release(&p->lock);
+        continue;
+      }
+      
+      uint64 DP = get_dynamic_priority(p);
+
+      if(!minproc){
+        minproc = p;
+        min_priority = DP;
+      }
+      else{
+        // Candidate for best process
+        if(DP == min_priority){
+          // Tie break by nunmber of times scheduled
+          if(minproc->sched_ct == p->sched_ct){
+            // Tie break by creation time
+            if(p->creation_time < minproc->creation_time){
+              release(&minproc->lock);
+              minproc = p;
+            }
+            else release(&p->lock);
+          }
+          else{
+            if(p->sched_ct < minproc->sched_ct){
+              release(&minproc->lock);
+              minproc = p;
+            }
+            else release(&p->lock);
+          }
+        }
+        else{
+          if(DP < min_priority){
+            release(&minproc->lock);
+            minproc = p;
+          }
+          else release(&p->lock);
+        }
+      }
     }
 
     if(minproc){
@@ -522,8 +612,33 @@ scheduler(void)
     #ifdef FCFS
       fcfs(c);
     #endif
+
+    #ifdef PBS
+      pbs(c);
+    #endif
   }
 }
+
+#ifdef PBS
+  void
+  update_time(){
+    struct proc *p;
+    for(p = proc; p < &proc[NPROC]; p++){
+      acquire(&p->lock);
+      switch(p->state){
+        case RUNNING:
+          p->run_time++;
+        break;
+        case SLEEPING:
+          p->sleep_time++;
+        break;
+        default:
+        break;
+      }
+      release(&p->lock);
+    }
+  }
+#endif
 
 // Switch to scheduler.  Must hold only p->lock
 // and have changed proc->state. Saves and restores

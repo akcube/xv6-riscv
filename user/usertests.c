@@ -813,6 +813,7 @@ killstatus(char *s)
 void
 preempt(char *s)
 {
+  #ifdef ROUNDROBIN
   int pid1, pid2, pid3;
   int pfds[2];
 
@@ -863,6 +864,10 @@ preempt(char *s)
   wait(0);
   wait(0);
   wait(0);
+  #endif
+  #if defined(PBS) || defined(FCFS)
+  printf("%s: Not applicable for scheduler\n", s);
+  #endif
 }
 
 // try to find any races between exit and wait

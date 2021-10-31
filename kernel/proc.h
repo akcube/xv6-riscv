@@ -108,7 +108,15 @@ struct proc {
   char name[16];               // Process name (debugging)
 
   // scheduler information private to the process
-  #ifdef FCFS
+  #if defined(FCFS) || defined(PBS)
     uint64 creation_time;
+  #endif
+
+  #ifdef PBS
+    int s_priority;
+    int sched_ct;
+
+    uint64 run_time;
+    uint64 sleep_time;
   #endif
 };
