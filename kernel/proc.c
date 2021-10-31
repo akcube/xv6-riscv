@@ -569,6 +569,7 @@ release_ptable(struct proc *e){
     }
 
     if(minproc){
+      minproc->sched_ct++;
       minproc->state = RUNNING;
       c->proc = minproc;
       swtch(&c->context, &minproc->context);
@@ -674,6 +675,7 @@ release_ptable(struct proc *e){
 
     if(minproc){
       minproc->state = RUNNING;
+      minproc->sched_ct++;
       c->proc = minproc;
       swtch(&c->context, &minproc->context);
       c->proc = 0;
@@ -992,7 +994,7 @@ procdump(void)
       state = states[p->state];
     else
       state = "???";
-    printf("%d\t%d\t%s\t%d\t%d\t%d\n", p->pid, get_dynamic_priority(p), state, p->run_time, ticks - p->creation_time - p->run_time, p->sched_ct);
+    printf("%d\t%d\t\t%s\t%d\t%d\t%d\n", p->pid, get_dynamic_priority(p), state, p->run_time, ticks - p->creation_time - p->run_time, p->sched_ct);
     printf("\n");
   }
 #endif
